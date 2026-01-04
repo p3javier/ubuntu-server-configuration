@@ -99,14 +99,9 @@
         - { rule: "allow", port: "22", proto: "tcp", comment: "SSH" }
         - { rule: "allow", port: "80", proto: "tcp", comment: "HTTP" }
         - { rule: "allow", port: "443", proto: "tcp", comment: "HTTPS" }
-        - { rule: "allow", port: "8000", proto: "tcp", comment: "Custom App" }
-        - {
-            rule: "allow",
-            port: "8443",
-            proto: "tcp",
-            comment: "Wazuh Dashboard",
-          }
-        - { rule: "allow", port: "8080", proto: "tcp", comment: "RAGnexus API" }
+        - { rule: "allow", port: "1514", proto: "udp", comment: "Wazuh Agent" }
+        - { rule: "allow", port: "1515", proto: "tcp", comment: "Wazuh Agent" }
+        - { rule: "allow", port: "1514", proto: "tcp", comment: "Wazuh Agent" }
 
         # DENY RULES
         - { rule: "deny", port: "3000", comment: "Explicitly Blocked" }
