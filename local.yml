@@ -1,0 +1,321 @@
+---
+- hosts: localhost
+  connection: local
+  become: true
+
+  vars:
+    # --- CONFIGURATION VARIABLES ---
+    # REPLACE with your actual public key
+    my_ssh_key: "{{ lookup('env', 'MY_PUBLIC_KEY') | default('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK...') }}"
+
+    # REPLACE with your Wazuh Manager IP/Hostname
+    wazuh_manager_ip: "YOUR_WAZUH_MANAGER_IP_HERE"
+
+  tasks:
+    # ==============================================================================
+    # 1. CORE SYSTEM SETUP & USER CREATION
+    # ==============================================================================
+    - name: Update and upgrade apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        cache_valid_time: 3600
+
+    - name: Install essential dependencies
+      apt:
+        name:
+          - git
+          - curl
+          - wget
+          - gnupg
+          - apt-transport-https
+          - software-properties-common
+          - ufw
+        state: present
+
+    - name: Create user 'ragnexus'
+      user:
+        name: ragnexus
+        groups: sudo
+        shell: /bin/bash
+        append: yes
+        state: present
+
+    - name: Set up authorized keys for 'ragnexus'
+      authorized_key:
+        user: ragnexus
+        state: present
+        key: "{{ my_ssh_key }}"
+
+    - name: Allow 'ragnexus' sudo without password
+      copy:
+        dest: /etc/sudoers.d/ragnexus
+        content: "ragnexus ALL=(ALL) NOPASSWD: ALL"
+        mode: 0440
+        validate: "visudo -cf %s"
+
+    # ==============================================================================
+    # 2. SSH HARDENING
+    # ==============================================================================
+    - name: Hardening SSH Configuration (Ubuntu 24.04)
+      copy:
+        dest: /etc/ssh/sshd_config
+        backup: yes
+        mode: "0600"
+        content: |
+          Port 22
+          Protocol 2
+          PermitRootLogin no
+          PasswordAuthentication no
+          PermitEmptyPasswords no
+          ChallengeResponseAuthentication no
+          UsePAM yes
+          X11Forwarding no
+          AllowAgentForwarding no
+          PrintMotd no
+          AcceptEnv LANG LC_*
+          Subsystem sftp /usr/lib/openssh/sftp-server
+          LogLevel VERBOSE
+          MaxAuthTries 3
+          MaxSessions 4
+      notify: Restart SSH
+
+    # ==============================================================================
+    # 3. FIREWALL (UFW) - UPDATED RULES
+    # ==============================================================================
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+
+    - name: Apply UFW Rules (Loop)
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        comment: "{{ item.comment | default('') }}"
+      loop:
+        # ALLOW RULES
+        - { rule: "allow", port: "22", proto: "tcp", comment: "SSH" }
+        - { rule: "allow", port: "80", proto: "tcp", comment: "HTTP" }
+        - { rule: "allow", port: "443", proto: "tcp", comment: "HTTPS" }
+        - { rule: "allow", port: "8000", proto: "tcp", comment: "Custom App" }
+        - {
+            rule: "allow",
+            port: "8443",
+            proto: "tcp",
+            comment: "Wazuh Dashboard",
+          }
+        - { rule: "allow", port: "8080", proto: "tcp", comment: "RAGnexus API" }
+
+        # DENY RULES
+        - { rule: "deny", port: "3000", comment: "Explicitly Blocked" }
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny # Default policy: Deny incoming traffic not explicitly allowed
+
+    # ==============================================================================
+    # 4. FAIL2BAN
+    # ==============================================================================
+    - name: Install Fail2Ban
+      apt:
+        name: fail2ban
+        state: present
+
+    - name: Configure Fail2Ban Jail for SSH
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          port    = ssh
+          filter  = sshd
+          logpath = /var/log/auth.log
+          maxretry = 3
+          bantime  = 1h
+          findtime = 10m
+      notify: Restart Fail2Ban
+
+    # ==============================================================================
+    # 5. DOCKER & TRIVY
+    # ==============================================================================
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Add Trivy GPG Key
+      apt_key:
+        url: https://aquasecurity.github.io/trivy-repo/deb/public.key
+        state: present
+
+    - name: Add Trivy Repository
+      apt_repository:
+        repo: "deb https://aquasecurity.github.io/trivy-repo/deb {{ ansible_distribution_release }} main"
+        state: present
+
+    - name: Install Trivy
+      apt:
+        name: trivy
+        state: present
+
+    - name: Create Trivy Scan Script
+      copy:
+        dest: /usr/local/bin/scan_containers.sh
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          echo "Starting Trivy Scan: $(date)" >> /var/log/trivy-report.log
+          docker ps --format "{{ '{{' }}.Image{{ '}}' }}" | sort | uniq | while read image; do
+            trivy image --severity CRITICAL,HIGH --no-progress "$image" >> /var/log/trivy-report.log 2>&1
+          done
+
+    - name: Schedule Daily Trivy Scan (3 AM)
+      cron:
+        name: "Daily Trivy Docker Scan"
+        hour: "3"
+        minute: "0"
+        job: "/usr/local/bin/scan_containers.sh"
+
+    # ==============================================================================
+    # 6. CLAMAV
+    # ==============================================================================
+    - name: Install ClamAV
+      apt:
+        name: [clamav, clamav-daemon]
+        state: present
+
+    - name: Stop ClamAV Daemon to Update DB
+      service:
+        name: clamav-freshclam
+        state: stopped
+
+    - name: Update ClamAV Database (Freshclam)
+      command: freshclam
+      ignore_errors: yes
+
+    - name: Start ClamAV Daemon
+      service:
+        name: clamav-freshclam
+        state: started
+        enabled: yes
+
+    - name: Schedule ClamAV Scan (Weekly on Sunday at 4 AM)
+      cron:
+        name: "Weekly ClamAV Scan"
+        weekday: "0"
+        hour: "4"
+        minute: "0"
+        job: "clamscan -r -i --log=/var/log/clamav-scan.log /home /tmp /var/www /etc"
+
+    # ==============================================================================
+    # 7. LYNIS
+    # ==============================================================================
+    - name: Add Lynis Key
+      apt_key:
+        url: https://packages.cisofy.com/keys/cisofy-software-public.key
+        state: present
+
+    - name: Add Lynis Repo
+      apt_repository:
+        repo: "deb https://packages.cisofy.com/community/lynis/deb/ stable main"
+        state: present
+
+    - name: Install Lynis
+      apt:
+        name: lynis
+        state: present
+
+    - name: Schedule Weekly Lynis Audit
+      cron:
+        name: "Weekly Lynis Audit"
+        weekday: "0"
+        hour: "5"
+        minute: "0"
+        job: "lynis audit system --cronjob > /var/log/lynis-report.log"
+
+    # ==============================================================================
+    # 8. WAZUH AGENT
+    # ==============================================================================
+    - name: Add Wazuh Key
+      shell: curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import && chmod 644 /usr/share/keyrings/wazuh.gpg
+      args:
+        creates: /usr/share/keyrings/wazuh.gpg
+
+    - name: Add Wazuh Repo
+      apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main"
+        state: present
+
+    - name: Install Wazuh Agent
+      apt:
+        name: wazuh-agent
+        state: present
+      environment:
+        WAZUH_MANAGER: "{{ wazuh_manager_ip }}"
+
+    - name: Enable and Start Wazuh Agent
+      service:
+        name: wazuh-agent
+        state: started
+        enabled: yes
+
+    # ==============================================================================
+    # 9. DAY 2 OPERATIONS (Updates & Maintenance)
+    # ==============================================================================
+    - name: Install Unattended Upgrades
+      apt:
+        name: unattended-upgrades
+        state: present
+
+    - name: Configure Unattended Upgrades (Security Only)
+      copy:
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}";
+              "${distro_id}:${distro_codename}-security";
+              "${distro_id}ESMApps:${distro_codename}-apps-security";
+              "${distro_id}ESM:${distro_codename}-infra-security";
+          };
+          Unattended-Upgrade::Package-Blacklist {
+          };
+          Unattended-Upgrade::Automatic-Reboot "false"; # Set to "true" if you can tolerate reboots
+          Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+    - name: Enable Periodic Updates
+      copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+
+    - name: Configure Log Rotation for Security Tools
+      copy:
+        dest: /etc/logrotate.d/security-tools
+        content: |
+          /var/log/trivy-report.log
+          /var/log/lynis-report.log
+          /var/log/clamav-scan.log 
+          {
+              weekly
+              rotate 4
+              compress
+              missingok
+              notifempty
+              create 0640 root root
+          }
+
+  handlers:
+    - name: Restart SSH
+      service:
+        name: sshd
+        state: restarted
+
+    - name: Restart Fail2Ban
+      service:
+        name: fail2ban
+        state: restarted
