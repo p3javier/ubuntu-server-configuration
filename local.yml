@@ -6,10 +6,10 @@
   vars:
     # --- CONFIGURATION VARIABLES ---
     # REPLACE with your actual public key
-    my_ssh_key: "{{ lookup('env', 'MY_PUBLIC_KEY') | default('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK...') }}"
+    my_ssh_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDP4s8zlKy7qg0AkGm2DZyfyyMUwLwSLUXBPteu5p3VM5vZPSpWvSSwVNKoo/ZbL6pOF2NtT5NbS2iE4rtcodKaWj6wBvnFqcsmQI3z2erf7XwNtcbyGMvMfbeI4baG+aDxntD8bnkId7G+2XZnSczFYKvpOqf9CcB9X1YIU++ZiR4+jMFL4JUpH5ahkDhCzyBuSvwAHOvBBEfbwd0A9MYHZMCoHyD1mgoyZyBKPKzGw2EU3rnUcgf02gYU0apXajDU2j0fyLLyUxeMDFVSqamLM/AELfUCWJBrck9U4c8piVoV5hqDD6MxkK+eiPfD0AJTK/e6Zo43gVkNlRIFGSIJjXqpHic7tgR3/hAUfS1cSgC3iPz1NBfZDE9+PBhxDSkWGaVHB2osYCcGJgo4boKKtBGgmAaRElYJh/7dLVLsSsT/kiN08HQaG+8fojEwrfk/DlJCzCws2CMWimxAoRu/KAwXFm0yXLSoWFFqTgteFxxoA+OVKA+mYflakde9wyBtyOxll3jxztVW0W+FoxHsv4105Decbkb4VypF3opSSGzKSOJT2NVGWjnxSUiYQz3rKQehEkCcyTVsYRNZO+o6jZdlfeniFzlW3dgTWO4Kqz/7E+k8wVlvcSvIq1EQQXA/3b34DbBWmiOslB366pWpOy5p6LgvTfx5fZze4KTOqQ=="
 
     # REPLACE with your Wazuh Manager IP/Hostname
-    wazuh_manager_ip: "YOUR_WAZUH_MANAGER_IP_HERE"
+    wazuh_manager_ip: "116.203.132.96"
 
   tasks:
     # ==============================================================================
