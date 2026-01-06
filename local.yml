@@ -31,6 +31,7 @@
           - apt-transport-https
           - software-properties-common
           - ufw
+          - python3-docker
         state: present
 
     - name: Create user 'ragnexus'
@@ -102,6 +103,12 @@
         - { rule: "allow", port: "1514", proto: "udp", comment: "Wazuh Agent" }
         - { rule: "allow", port: "1515", proto: "tcp", comment: "Wazuh Agent" }
         - { rule: "allow", port: "1514", proto: "tcp", comment: "Wazuh Agent" }
+        - {
+            rule: "allow",
+            port: "9443",
+            proto: "tcp",
+            comment: "Portainer UI (HTTPS)",
+          }
 
         # DENY RULES
         - { rule: "deny", port: "3000", comment: "Explicitly Blocked" }
