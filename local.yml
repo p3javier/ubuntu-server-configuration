@@ -32,6 +32,7 @@
           - software-properties-common
           - ufw
           - python3-docker
+          - unzip
         state: present
 
     - name: Create user 'ragnexus'
@@ -148,6 +149,24 @@
         name: docker.io
         state: present
 
+    # --- PORTAINER SETUP ---
+    - name: Create Portainer Data Volume
+      docker_volume:
+        name: portainer_data
+
+    - name: Deploy Portainer Container
+      docker_container:
+        name: portainer
+        image: portainer/portainer-ce:latest
+        state: started
+        restart_policy: always
+        ports:
+          - "9443:9443" # HTTPS Port
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+          - "portainer_data:/data"
+
+    # --- TRIVY SETUP ---
     - name: Add Trivy GPG Key
       apt_key:
         url: https://aquasecurity.github.io/trivy-repo/deb/public.key
